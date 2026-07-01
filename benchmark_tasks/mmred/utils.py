@@ -3,7 +3,6 @@
 This module provides:
 - Answer extraction from model outputs (handling reasoning chains)
 - Custom metric processing
-- Image loading for multimodal evaluation
 """
 
 import json
@@ -19,11 +18,6 @@ except ImportError:
         def __init__(self, **kwargs): pass
         @abstractmethod
         def apply(self, resps, docs): return resps
-
-try:
-    from PIL import Image
-except ImportError:
-    Image = None
 
 
 # ============================================================================
@@ -267,8 +261,10 @@ def process_results(doc: dict, results: list[str]) -> dict[str, float]:
     return metrics
 
 
-# Length weights for 32 / 64 / 128 step subtasks within each question-type group.
-MMRED_LENGTH_WEIGHTS = [2, 4, 16]
+# Length weights for the 32 / 64 / 128 subtasks within each question-type group.
+# Weight is proportional to context length (seq_len / 32) -> 1 / 2 / 4: long contexts
+# count more, but only linearly (one doubling per length step), not quadratically.
+MMRED_LENGTH_WEIGHTS = [1, 2, 4]
 
 
 def group_length_weighted_aggregate(
@@ -290,105 +286,3 @@ def group_harmonic_mean_aggregate(
     eps = 1e-6
     n = len(metrics)
     return n / sum(1.0 / (v + eps) for v in metrics)
-
-
-def weighted_length_aggregate(items: list[dict]) -> float:
-    """Aggregate metric with exponential weight on length in facts. 32 facts is base, 64 is 2x, 128 is 4x, etc.
-    
-    Args:
-        items: List of result dictionaries
-        
-    Returns:
-        Weighted average score
-    """
-    from collections import defaultdict
-
-    # Group by task type
-    task_scores = defaultdict(lambda: {"weighted_sum": 0.0, "total_weight": 0.0})
-
-    for item in items:
-        score = item.get("em.dc_aggregate", 0)
-        seq_len = item.get("seq_len", 0)
-        # Extract task type from metric keys
-        task = "unknown"
-        for k in item:
-            if k.startswith("em.") and k != "em.dc_aggregate" and ".len" not in k:
-                task = k.replace("em.", "")
-                break
-
-        weight = 2 ** (seq_len / 32)  # exponential: 2 for 32, 4 for 64, 16 for 128
-        task_scores[task]["weighted_sum"] += score * weight
-        task_scores[task]["total_weight"] += weight
-
-    # Per-task length-weighted averages
-    per_task = []
-    for s in task_scores.values():
-        if s["total_weight"] > 0:
-            per_task.append(s["weighted_sum"] / s["total_weight"])
-
-    if not per_task:
-        return 0.0
-
-    # Harmonic mean across task types (penalizes weakness on any task)
-    eps = 1e-6
-    n = len(per_task)
-    return n / sum(1.0 / (v + eps) for v in per_task)
-
-
-# ============================================================================
-# Multimodal Support
-# ============================================================================
-
-def doc_to_image(doc: dict) -> list:
-    """Load images for multimodal evaluation.
-    
-    Args:
-        doc: Document dictionary with image paths in meta
-        
-    Returns:
-        List of PIL Image objects
-    """
-    if Image is None:
-        raise ImportError("PIL is required for multimodal evaluation. Install with: pip install Pillow")
-    
-    meta = doc.get("meta", {})
-    image_paths = meta.get("images", [])
-    
-    if not image_paths:
-        return []
-    
-    images = []
-    for path in image_paths:
-        # Handle both local paths and HuggingFace dataset paths
-        if isinstance(path, str):
-            try:
-                img = Image.open(path).convert("RGB")
-                images.append(img)
-            except Exception as e:
-                print(f"Warning: Could not load image {path}: {e}")
-        elif hasattr(path, "convert"):
-            # Already a PIL Image
-            images.append(path)
-    
-    return images
-
-
-def doc_to_text_with_images(doc: dict) -> str:
-    """Format document text with image placeholders.
-    
-    Args:
-        doc: Document dictionary
-        
-    Returns:
-        Formatted prompt text
-    """
-    instruction = doc.get("instruction", "")
-    inputs = doc.get("inputs", {})
-    
-    # Format instruction with inputs
-    try:
-        text = instruction.format(**inputs)
-    except (KeyError, ValueError):
-        text = instruction
-    
-    return text.strip()

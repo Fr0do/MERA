@@ -2,7 +2,7 @@
 # Inheritable configuration for all MMReD Dense Context tasks
 
 output_type: generate_until
-dataset_path: MERA-evaluation/MMReD
+dataset_path: dondosss/mmred_mera
 test_split: test
 
 # Prompt formatting
@@ -13,7 +13,7 @@ target_delimiter: "\nОтвет: "
 # Generation settings
 generation_kwargs:
   do_sample: false
-  max_gen_toks: 8192
+  max_gen_toks: 32768
   until:
     - "\nВопрос:"
     - "\nЗадача:"

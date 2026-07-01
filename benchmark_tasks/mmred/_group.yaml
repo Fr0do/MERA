@@ -51,7 +51,14 @@ task:
       - metric: em.dc_aggregate
         aggregation: !function utils.group_length_weighted_aggregate
         filter_list: scoring
+# Top-level harness row = plain size-weighted mean over leaves (sanity only).
+# The OFFICIAL MMReD headline — harmonic mean across the 5 per-type length-weighted
+# subgroups — CANNOT be computed here: lm-eval flattens group-of-groups aggregation to
+# leaf metrics before calling the group function, so a harmonic at this level silently
+# drops the 1/2/4 length weighting (verified end-to-end). The headline is produced
+# post-hoc by scripts/mmred_score.py from the per-type subgroup rows emitted below.
 aggregate_metric_list:
   - metric: em.dc_aggregate
-    aggregation: !function utils.group_harmonic_mean_aggregate
+    aggregation: mean
+    weight_by_size: true
     filter_list: scoring
